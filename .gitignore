@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.swp
+*.swo
+*.tmp
+*.log
+tmp/
+
+large_models_examples/large_models_examples/color_sorting/hed_model/hed_pretrained_bsds.caffemodel
+large_models_examples/large_models_examples/resources/models/FastSAM-x.pt

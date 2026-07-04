@@ -1,0 +1,29 @@
+2026-03-20 21:00:46,301 INFO [streaming_server.py:842] {'encoder': '/home/ubuntu/third_party/sherpa-onnx/sherpa-onnx-streaming-zipformer-zh-xlarge-int8-2025-06-30/encoder.int8.onnx', 'decoder': '/home/ubuntu/third_party/sherpa-onnx/sherpa-onnx-streaming-zipformer-zh-xlarge-int8-2025-06-30/decoder.onnx', 'joiner': '/home/ubuntu/third_party/sherpa-onnx/sherpa-onnx-streaming-zipformer-zh-xlarge-int8-2025-06-30/joiner.int8.onnx', 'zipformer2_ctc': None, 'wenet_ctc': None, 'paraformer_encoder': None, 'paraformer_decoder': None, 'tokens': '/home/ubuntu/third_party/sherpa-onnx/sherpa-onnx-streaming-zipformer-zh-xlarge-int8-2025-06-30/tokens.txt', 'sample_rate': 16000, 'feat_dim': 80, 'provider': 'cuda', 'decoding_method': 'greedy_search', 'num_active_paths': 4, 'use_endpoint': 1, 'rule1_min_trailing_silence': 2.4, 'rule2_min_trailing_silence': 1.2, 'rule3_min_utterance_length': 20, 'hotwords_file': '', 'hotwords_score': 1.5, 'modeling_unit': 'cjkchar', 'bpe_vocab': '', 'blank_penalty': 0.0, 'port': 6006, 'nn_pool_size': 1, 'max_batch_size': 3, 'max_wait_ms': 10, 'max_message_size': 1048576, 'max_queue_size': 32, 'max_active_connections': 200, 'num_threads': 2, 'certificate': None, 'doc_root': '/home/ubuntu/third_party/sherpa-onnx/python-api-examples/web'}
+2026-03-20 21:01:30,773 INFO [streaming_server.py:667] No certificate provided
+2026-03-20 21:01:30,802 INFO [server.py:341] server listening on [::]:6006
+2026-03-20 21:01:30,803 INFO [server.py:341] server listening on 0.0.0.0:6006
+2026-03-20 21:01:30,803 INFO [streaming_server.py:693] Please visit one of the following addresses:
+
+  http://localhost:6006
+
+Since you are not providing a certificate, you cannot use your microphone from within the browser using public IP addresses. Only localhost can be used.You also cannot use 0.0.0.0 or 127.0.0.1
+2026-03-20 21:01:53,419 INFO [server.py:529] connection open
+2026-03-20 21:01:53,420 INFO [streaming_server.py:734] Connected: ('127.0.0.1', 60478). Number of connections: 1/200
+2026-03-20 21:01:58,172 INFO [streaming_server.py:718] Disconnected: ('127.0.0.1', 60478). Number of connections: 0/200
+2026-03-20 21:01:58,173 ERROR [server.py:378] connection handler failed
+Traceback (most recent call last):
+  File "/home/ubuntu/.local/lib/python3.10/site-packages/websockets/asyncio/server.py", line 376, in conn_handler
+    await self.handler(connection)
+  File "/home/ubuntu/third_party/sherpa-onnx/python-api-examples/streaming_server.py", line 711, in handle_connection
+    await self.handle_connection_impl(socket)
+  File "/home/ubuntu/third_party/sherpa-onnx/python-api-examples/streaming_server.py", line 759, in handle_connection_impl
+    await socket.send(json.dumps(message))
+  File "/home/ubuntu/.local/lib/python3.10/site-packages/websockets/asyncio/connection.py", line 476, in send
+    async with self.send_context():
+  File "/usr/lib/python3.10/contextlib.py", line 199, in __aenter__
+    return await anext(self.gen)
+  File "/home/ubuntu/.local/lib/python3.10/site-packages/websockets/asyncio/connection.py", line 957, in send_context
+    raise self.protocol.close_exc from original_exc
+websockets.exceptions.ConnectionClosedOK: received 1000 (OK); then sent 1000 (OK)
+2026-03-20 21:02:08,587 INFO [server.py:440] server closing
+2026-03-20 21:02:08,588 INFO [server.py:473] server closed
