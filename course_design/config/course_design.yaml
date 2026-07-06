@@ -1,0 +1,50 @@
+map_name: map_01
+use_teb: true
+map_frame: map
+
+mapping:
+  map_name: map_01
+  map_topic: /map
+  scan_topic: /scan
+  save_service: /slam_toolbox/save_map
+  save_path: /home/ubuntu/ros2_ws/src/slam/maps/map_01
+  status_period_sec: 5.0
+  save_timeout_sec: 15.0
+
+navigation:
+  timeout_sec: 600.0
+  feedback_period_sec: 5.0
+  stop_topics:
+    - /controller/cmd_vel
+    - /cmd_vel
+
+waypoints:
+  home:
+    x: 0.0
+    y: 0.0
+    yaw_deg: 0.0
+  pick_area:
+    x: 1.0
+    y: 0.0
+    yaw_deg: 0.0
+  goal_red:
+    x: 1.0
+    y: 1.0
+    yaw_deg: 90.0
+  goal_green:
+    x: 0.0
+    y: 1.0
+    yaw_deg: 180.0
+  goal_blue:
+    x: -1.0
+    y: 1.0
+    yaw_deg: 180.0
+
+behavior:
+  autorun: true
+  start_delay_sec: 2.0
+  default_task: patrol
+  patrol_points:
+    - pick_area
+    - goal_green
+  patrol_count: 3

@@ -60,115 +60,11 @@
 
 ## 3. 新增代码总体设计
 
-新增 ROS2 Python 包：
-
-```text
-src/course_design/
-  package.xml
-  setup.py
-  setup.cfg
-  resource/course_design
-  course_design/
-    __init__.py
-    common.py
-    map_status_node.py
-    waypoint_nav_node.py
-    behavior_node.py
-    color_debug_node.py
-    align_debug_node.py
-    arm_task_node.py
-    single_color_transport_node.py
-    sorting_workflow_node.py
-  launch/
-    mapping_debug.launch.py
-    navigation_debug.launch.py
-    behavior_debug.launch.py
-    color_debug.launch.py
-    align_debug.launch.py
-    arm_debug.launch.py
-    single_color_transport.launch.py
-    full_sorting_workflow.launch.py
-  config/
-    course_design.yaml
-```
-
-注册 console scripts：
-
-```text
-map_status = course_design.map_status_node:main
-waypoint_nav = course_design.waypoint_nav_node:main
-behavior = course_design.behavior_node:main
-color_debug = course_design.color_debug_node:main
-align_debug = course_design.align_debug_node:main
-arm_task = course_design.arm_task_node:main
-single_color_transport = course_design.single_color_transport_node:main
-sorting_workflow = course_design.sorting_workflow_node:main
-```
+新增 ROS2 Python 包：src/course_design/
 
 ## 4. 配置文件设计
 
 新增 `src/course_design/config/course_design.yaml`，集中管理地图、导航目标点、决策任务、视觉和机械臂动作等。
-
-建议初始内容：
-
-```yaml
-/**:
-  ros__parameters:
-    map_name: "map_01"
-    map_frame: "map"
-    base_frame: "base_footprint"
-
-    waypoints:
-      home: [0.0, 0.0, 0.0]
-      pick_area: [1.0, 0.0, 0.0]
-      place_red: [1.0, 0.6, 0.0]
-      place_green: [1.0, 0.0, 0.0]
-      place_blue: [1.0, -0.6, 0.0]
-
-    navigation:
-      use_teb: true
-      nav_timeout_sec: 90.0
-      controller_params_file: "nav2_params.yaml"
-      controller_tuning_note: "Nav2静态/动态避障通过navigation/config中的costmap和controller YAML现场调整"
-
-    behavior:
-      default_task: "go_pick_area"
-      patrol_points: ["home", "pick_area"]
-      patrol_cycles: 3
-      wait_at_point_sec: 2.0
-
-    colors:
-      target_colors: ["red", "green", "blue"]
-      detect_type: "circle"
-
-    align:
-      target_x: 320
-      target_y: 270
-      x_tolerance: 25
-      y_tolerance: 25
-      stable_frames: 20
-      max_linear_x: 0.10
-      max_angular_z: 0.35
-      linear_kp: 0.001
-      angular_kp: 0.003
-      timeout_sec: 8.0
-
-    actions:
-      init: "navigation_pick_init"
-      pick: "navigation_pick"
-      place_red: "place_left"
-      place_green: "place_center"
-      place_blue: "place_right"
-      fallback_place: "navigation_place"
-
-    workflow:
-      run_order: ["red", "green", "blue"]
-      detect_timeout_sec: 10.0
-      nav_timeout_sec: 90.0
-      pick_timeout_sec: 12.0
-      place_timeout_sec: 12.0
-      return_home: true
-```
 
 现场调试时只改 YAML，不直接改代码。
 
@@ -176,7 +72,7 @@ sorting_workflow = course_design.sorting_workflow_node:main
 
 ### 5.1 建图调试
 
-新增 launch：`mapping_debug.launch.py`
+新增 launch：`mapping.launch.py`
 
 职责：
 
@@ -202,7 +98,7 @@ sorting_workflow = course_design.sorting_workflow_node:main
 
 ### 5.2 导航到点调试
 
-新增 launch：`navigation_debug.launch.py`
+新增 launch：`course_nav.launch.py`
 
 职责：
 
@@ -216,7 +112,9 @@ sorting_workflow = course_design.sorting_workflow_node:main
 - 提供服务：
   - `~/go_home`
   - `~/go_pick_area`
-  - `~/go_named_point`，如需要可使用 `interfaces/srv/SetString`
+  - `~/go_goal_red`
+  - `~/go_goal_green`
+  - `~/go_goal_blue`
 - 使用 `BasicNavigator.goToPose()` 执行导航
 - 输出 Nav2 active、目标点、ETA、最终结果
 
@@ -230,12 +128,11 @@ sorting_workflow = course_design.sorting_workflow_node:main
 
 ### 5.3 导航避障参数预留
 
-不再设计独立雷达避障 launch。避障作为 Nav2 导航能力的一部分验证，参数调整保留在已有 YAML 中。
+避障作为 Nav2 导航能力的一部分验证，参数调整保留在已有 YAML 中。
 
 职责：
 
 - 保留并记录 Nav2 costmap 与控制器调参入口。
-- 不新增 `obstacle_debug_node`，不调用 `/lidar_app/set_running`。
 - 导航调试时关注以下已有参数文件：
   - `src/navigation/config/nav2_params.yaml`
   - `src/navigation/config/nav2_controller_teb.yaml`
@@ -251,43 +148,31 @@ sorting_workflow = course_design.sorting_workflow_node:main
 
 终端输出：
 
-- `navigation_debug.launch.py` 和 `waypoint_nav_node` 输出当前地图、目标点、Nav2 状态、导航结果。
-- 如需观察避障效果，使用 RViz 查看 global/local costmap 和规划路径。
+- `course_nav.launch.py` 和 `waypoint_nav_node` 输出当前地图、目标点、Nav2 状态、导航结果。
+- RViz 查看 global/local costmap 和规划路径，观察避障效果。
 
 验收：
 
 - 静态障碍：目标点导航路径能绕开已建图障碍物。
 - 动态障碍：导航过程中临时加入障碍物，小车能减速、等待、局部绕行或重新规划。
-- 避障表现不理想时，只调整 Nav2 YAML，不新增独立雷达避障玩法。
+- 避障表现不理想时，调整 Nav2 YAML。
 
 ### 5.4 决策树调试
 
-新增 launch：`behavior_debug.launch.py`
+新增 launch：`behavior.launch.py`
 
 职责：
 
-- Include `navigation_debug.launch.py` 或直接 Include `navigation/launch/navigation.launch.py`。
+- Include `course_nav.launch.py`。
 - 启动 `behavior_node`。
 - `behavior_node` 复用公共导航工具函数和 `BasicNavigator`，自己执行预设任务树；不要依赖 `waypoint_nav_node` 已经启动。
 
-初始支持任务：
+支持任务：
 
 - `go_named_point`：导航到指定命名点。
-- `go_pick_area`：导航到取货区。
 - `return_home`：返回起点。
-- `patrol`：在两个命名点之间往返巡逻，默认 `home <-> pick_area`。
+- `patrol`：在两个命名点之间往返巡逻，默认 `pick_area <-> goal_green`，可指定次数，默认3次。
 
-建议状态机：
-
-```text
-IDLE
-LOAD_TASK
-NAV_TO_POINT
-WAIT_AT_POINT
-NEXT_STEP
-DONE
-ERROR
-```
 
 终端输出：
 
@@ -304,127 +189,3 @@ ERROR
 - 能执行一次导航到目标点任务。
 - 能在两个点之间完成指定次数往返巡逻。
 - 任一步导航失败时，决策树进入 `ERROR` 并输出失败步骤。
-
-## 6. 最终完整工作流实现
-
-### 6.1 单功能调试节点
-
-保留以下可单独 launch 的调试节点：
-
-- `color_debug_node`
-  - 设置红、绿、蓝颜色识别
-  - 输出识别到的颜色、中心点、半径
-- `align_debug_node`
-  - 只做视觉对准，不抓取
-  - 发布 `/controller/cmd_vel`
-  - 对准完成后停车
-- `arm_task_node`
-  - 只调机械臂动作组
-  - 支持 `mode:=pick|place|init`
-  - 支持 `target_color:=red|green|blue`
-- `single_color_transport_node`
-  - 单色闭环：导航到取货区 -> 识别 -> 对准 -> 抓取 -> 放置 -> 可选回起点
-
-### 6.2 完整 workflow 节点
-
-新增 `sorting_workflow_node`。
-
-主状态机：
-
-```text
-INIT
-NAV_TO_PICK
-DETECT_COLOR
-ALIGN_OBJECT
-PICK_OBJECT
-NAV_TO_PLACE
-PLACE_OBJECT
-NEXT_COLOR
-RETURN_HOME
-DONE
-ERROR
-```
-
-执行策略：
-
-- 按 `workflow.run_order` 处理颜色，默认 `red -> green -> blue`
-- 每种颜色都导航到 `pick_area`
-- 在取货区识别并对准目标颜色
-- 抓取后导航到对应放置点：
-  - `red -> place_red`
-  - `green -> place_green`
-  - `blue -> place_blue`
-- 到达放置点后执行对应放置动作：
-  - `red -> place_left`
-  - `green -> place_center`
-  - `blue -> place_right`
-- 所有颜色完成后按参数决定是否回 `home`
-
-终端必须输出：
-
-- 当前阶段
-- 当前颜色
-- 当前导航目标点
-- Nav2 ETA 或反馈摘要
-- 识别目标中心点
-- 对准误差
-- 抓取/放置动作组名称
-- 每个阶段成功或失败原因
-
-## 7. Launch 文件规划
-
-最低目标 launch：
-
-- `mapping_debug.launch.py`
-- `navigation_debug.launch.py`
-- `behavior_debug.launch.py`
-
-物块搬运调试 launch：
-
-- `color_debug.launch.py`
-- `align_debug.launch.py`
-- `arm_debug.launch.py`
-- `single_color_transport.launch.py`
-
-最终完整 launch：
-
-- `full_sorting_workflow.launch.py`
-
-`full_sorting_workflow.launch.py` 启动：
-
-1. `navigation/launch/navigation.launch.py`
-2. `example` 的 `color_detect`
-3. `sorting_workflow_node`
-
-不建议在最终 launch 中同时启动建图。最终流程应使用已经保存好的地图。
-
-## 8. 推荐实施顺序
-
-1. 建立 `course_design` 包、配置文件、公共工具。
-2. 实现 `mapping_debug.launch.py` 和 `map_status_node`。
-3. 实现 `navigation_debug.launch.py` 和 `waypoint_nav_node`。
-4. 保留 Nav2 避障参数入口，使用 `navigation_debug.launch.py` 验证静态/动态避障。
-5. 实现 `behavior_debug.launch.py` 和 `behavior_node`。
-6. 实现 `color_debug_node`。
-7. 实现 `align_debug_node`。
-8. 实现 `arm_task_node`。
-9. 实现 `single_color_transport_node`。
-10. 实现 `sorting_workflow_node` 和 `full_sorting_workflow.launch.py`。
-11. 按最低目标、单色闭环、三色完整流程依次验收。
-
-## 9. 验收标准
-
-最低可完成目标：
-
-- 能完成一次建图并保存地图文件。
-- 能加载地图并导航到至少两个命名点。
-- 导航过程中能绕开地图静态障碍，并能对临时动态障碍做出局部避让、等待或重新规划。
-- 能单独启动决策树任务，完成导航到点和两点往返巡逻。
-- 建图、导航、决策都有独立 launch 和清晰终端输出。
-
-最终完整工作流：
-
-- 能单独调试颜色识别、视觉对准、机械臂抓放、单色搬运。
-- 能通过一个 launch 启动完整三色分类搬运。
-- 流程失败时能停车并输出失败阶段。
-- 流程完成时输出 `DONE`，底盘速度为 0，机械臂处于安全姿态。

@@ -33,6 +33,7 @@
 - 不从网络下载依赖、模型或系统包。
 - 不直接改厂家 `example`、`slam`、`navigation`、`app` 源码，新增薄封装节点放在 `src/course_design`。
 - 建图、导航、避障、识别、抓取都必须可单独 launch 调试。
+- 新增的包需要撰写readme.md，说明如何 launch、调试、配置。
 
 ## 3. 可以复用的现有接口
 
@@ -76,9 +77,7 @@ SLAM/地图：
 
 底盘：
 
-- 调试阶段线速度不超过 `0.15 m/s`。
-- 视觉对准线速度不超过 `0.10 m/s`。
-- 调试阶段角速度不超过 `0.45 rad/s`。
+- 避免底盘速度过大。
 - 任何失败、超时、Ctrl+C、流程完成都必须发布零速度。
 - 完整流程运行时必须有人看守。
 
@@ -98,20 +97,6 @@ Nav2：
 
 所有主流程节点必须用明确状态机，并在终端输出状态切换。
 
-最低目标节点：
-
-- `map_status_node`：`INIT -> WAIT_TOPICS -> MAPPING -> READY_TO_SAVE`
-- `waypoint_nav_node`：`IDLE -> SEND_GOAL -> NAVIGATING -> SUCCEEDED|FAILED|CANCELED`
-- `obstacle_debug_node`：`INIT -> ENTER -> SET_PARAM -> RUNNING -> STOPPED|ERROR`
-
-最终 workflow：
-
-```text
-INIT -> NAV_TO_PICK -> DETECT_COLOR -> ALIGN_OBJECT -> PICK_OBJECT
-     -> NAV_TO_PLACE -> PLACE_OBJECT -> NEXT_COLOR -> RETURN_HOME -> DONE
-                                                       \-> ERROR
-```
-
 状态机要求：
 
 - 每个状态进入时打印日志。
@@ -123,44 +108,18 @@ INIT -> NAV_TO_PICK -> DETECT_COLOR -> ALIGN_OBJECT -> PICK_OBJECT
 
 所有节点 `output='screen'`。
 
-必须输出：
-
-- 当前 launch/节点启动成功。
-- 当前参数摘要：地图名、目标点、颜色、速度阈值、动作组。
-- 服务等待与连接结果。
-- 导航目标坐标、导航反馈、结果。
-- 颜色识别结果：颜色、中心点、半径。
-- 对准误差和稳定帧数。
-- 抓取/放置动作组开始与结束。
-- 失败原因与停车确认。
-
 避免输出：
 
 - 高频逐帧刷屏。
 - 大段完整消息对象。
 - 无意义的 `feedback` 重复日志。
 
-建议节流：
-
-- 高频状态每 0.5 到 1 秒输出一次。
-- Nav2 ETA 每 1 到 2 秒输出一次。
 
 ## 7. Launch 规范
 
 每个功能都要有独立 launch：
 
-- `mapping_debug.launch.py`
-- `navigation_debug.launch.py`
-- `color_debug.launch.py`
-- `align_debug.launch.py`
-- `arm_debug.launch.py`
-- `single_color_transport.launch.py`
-- `full_sorting_workflow.launch.py`
-
 launch 编写要求：
-
-- 使用 `get_package_share_directory` 获取包路径。
-- 参数必须通过 `DeclareLaunchArgument` 暴露。
 - 不重复启动会冲突的硬件节点。
 - 最终完整 launch 不启动 SLAM 建图。
 - 建图 launch 不启动最终 workflow。
@@ -189,20 +148,6 @@ colcon build --packages-select course_design --parallel-workers 1
 source install/setup.bash
 ```
 
-语法检查：
-
-```bash
-python3 -m compileall src/course_design
-```
-
-运行前检查：
-
-```bash
-ros2 pkg prefix course_design
-ros2 pkg executables course_design
-ros2 topic list
-```
-
 手动停车：
 
 ```bash
@@ -215,12 +160,11 @@ ros2 topic pub --once /controller/cmd_vel geometry_msgs/msg/Twist "{}"
 
 1. 建图保存
 2. 导航到命名点
-3. 雷达避障
+3. 导航行为树
 4. 颜色识别
-5. 视觉对准
-6. 机械臂抓放
-7. 单色搬运
-8. 三色完整搬运
+5. 机械臂抓放
+6. 单色搬运
+7. 三色完整搬运
 
 前一层不稳定时，不进入后一层。
 
