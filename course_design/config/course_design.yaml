@@ -17,6 +17,18 @@ navigation:
     - /controller/cmd_vel
     - /cmd_vel
 
+qrcode:
+  image_topic: /depth_cam/rgb0/image_raw
+  target_topic: /qrcode/target
+  image_result_topic: /qrcode/image_result
+  detection_period_sec: 0.2
+  timeout_sec: 0.0
+  allowed_targets:
+    - pick_area
+    - goal_red
+    - goal_green
+    - goal_blue
+
 waypoints:
   home:
     x: 0.0
@@ -43,7 +55,8 @@ behavior:
   require_initial_pose: true
   initial_pose_topic: /initialpose
   start_topic: /behavior_start
-  default_task: patrol
+  reset_topic: /behavior_reset
+  default_task: qrcode_target   #patrol, qrcode_target
   patrol_points:
     - pick_area
     - home

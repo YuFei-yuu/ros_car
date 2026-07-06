@@ -1,4 +1,5 @@
 import threading
+import time
 
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped
@@ -7,7 +8,7 @@ from nav2_simple_commander.robot_navigator import BasicNavigator
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 from visualization_msgs.msg import MarkerArray
 
@@ -30,9 +31,17 @@ class BehaviorNode(Node):
         self.config, self.config_path = load_config_from_node(self)
         self.navigation_config = self.config.get('navigation', {})
         self.behavior_config = self.config.get('behavior', {})
+        self.qrcode_config = self.config.get('qrcode', {})
         self.timeout_sec = float(self.navigation_config.get('timeout_sec', 600.0))
         self.feedback_period_sec = float(
             self.navigation_config.get('feedback_period_sec', 5.0))
+        self.qrcode_timeout_sec = float(self.qrcode_config.get('timeout_sec', 20.0))
+        self.qrcode_allowed_targets = set(
+            self.qrcode_config.get(
+                'allowed_targets',
+                ['pick_area', 'goal_red', 'goal_green', 'goal_blue'],
+            )
+        )
         stop_topics = self.navigation_config.get('stop_topics', ['/controller/cmd_vel'])
         self.stop_publishers = make_stop_publishers(self, stop_topics)
         self.callback_group = ReentrantCallbackGroup()
@@ -42,6 +51,9 @@ class BehaviorNode(Node):
         self.default_task_running = False
         self.initial_pose_received = False
         self.task_thread = None
+        self.qrcode_target = ''
+        self.qrcode_event = threading.Event()
+        self.reset_event = threading.Event()
         self.marker_pub = self.create_publisher(MarkerArray, '/waypoints', 1)
         self.create_timer(5.0, self.publish_markers)
 
@@ -57,6 +69,12 @@ class BehaviorNode(Node):
             self.start_callback,
             callback_group=self.callback_group,
         )
+        self.create_service(
+            Trigger,
+            '~/reset',
+            self.reset_callback,
+            callback_group=self.callback_group,
+        )
         self.create_subscription(
             Bool,
             self.behavior_config.get('start_topic', '/behavior_start'),
@@ -65,10 +83,24 @@ class BehaviorNode(Node):
             callback_group=self.callback_group,
         )
         self.create_subscription(
+            Bool,
+            self.behavior_config.get('reset_topic', '/behavior_reset'),
+            self.reset_topic_callback,
+            1,
+            callback_group=self.callback_group,
+        )
+        self.create_subscription(
             PoseWithCovarianceStamped,
             self.behavior_config.get('initial_pose_topic', '/initialpose'),
             self.initial_pose_callback,
             1,
+            callback_group=self.callback_group,
+        )
+        self.create_subscription(
+            String,
+            self.qrcode_config.get('target_topic', '/qrcode/target'),
+            self.qrcode_target_callback,
+            10,
             callback_group=self.callback_group,
         )
 
@@ -114,6 +146,21 @@ class BehaviorNode(Node):
         if self.state == 'WAIT_INITIAL_POSE':
             self.set_state('READY', 'initial pose received, waiting for start command')
 
+    def qrcode_target_callback(self, msg):
+        target = msg.data.strip()
+        if target not in self.qrcode_allowed_targets:
+            self.get_logger().warn(
+                f'Ignoring QR target "{target}". '
+                f'Allowed targets: {sorted(self.qrcode_allowed_targets)}'
+            )
+            return
+        if target not in self.config.get('waypoints', {}):
+            self.get_logger().warn(f'Ignoring QR target "{target}": no waypoint configured')
+            return
+        self.qrcode_target = target
+        self.qrcode_event.set()
+        self.get_logger().info(f'QR target received: {target}')
+
     def start_callback(self, _request, response):
         success, message = self.start_default_task_async()
         response.success = success
@@ -127,6 +174,20 @@ class BehaviorNode(Node):
         success, message = self.start_default_task_async()
         if not success:
             self.get_logger().error(f'Start request rejected: {message}')
+
+    def reset_callback(self, _request, response):
+        self.reset_event.set()
+        response.success = True
+        response.message = 'behavior reset accepted'
+        self.get_logger().info('Behavior reset received from ~/reset service')
+        return response
+
+    def reset_topic_callback(self, msg):
+        if not msg.data:
+            self.get_logger().info('Ignoring /behavior_reset false')
+            return
+        self.reset_event.set()
+        self.get_logger().info('Behavior reset received from /behavior_reset topic')
 
     def start_default_task_async(self):
         with self.start_lock:
@@ -178,6 +239,8 @@ class BehaviorNode(Node):
             self.set_state('RUNNING', f'task={task}')
             if task == 'patrol':
                 success, message = self.run_patrol()
+            elif task == 'qrcode_target':
+                success, message = self.run_qrcode_target_task()
             elif task == 'return_home':
                 success, message = self.go_named_point('home')
             elif task.startswith('go_named_point'):
@@ -197,6 +260,69 @@ class BehaviorNode(Node):
             return success, message
         finally:
             self.task_lock.release()
+
+    def wait_for_qrcode_target(self):
+        self.qrcode_target = ''
+        self.qrcode_event.clear()
+        if self.qrcode_timeout_sec <= 0.0:
+            self.set_state('WAIT_QRCODE', 'waiting for QR target')
+            while rclpy.ok():
+                if self.qrcode_event.wait(timeout=0.2):
+                    target = self.qrcode_target
+                    if target in self.qrcode_allowed_targets:
+                        return True, target
+                    self.qrcode_event.clear()
+            return False, 'ROS shutdown while waiting for QR target'
+
+        self.set_state(
+            'WAIT_QRCODE',
+            f'waiting up to {self.qrcode_timeout_sec:.1f}s for QR target',
+        )
+        deadline = time.monotonic() + self.qrcode_timeout_sec
+        while rclpy.ok() and time.monotonic() < deadline:
+            if self.qrcode_event.wait(timeout=0.2):
+                target = self.qrcode_target
+                if target in self.qrcode_allowed_targets:
+                    return True, target
+                self.qrcode_event.clear()
+        return False, 'QR target timeout'
+
+    def wait_for_reset_instruction(self):
+        self.reset_event.clear()
+        self.set_state(
+            'WAIT_RESET',
+            'waiting for /behavior_reset true or /behavior_node/reset',
+        )
+        while rclpy.ok():
+            if self.reset_event.wait(timeout=0.2):
+                return True, 'reset received'
+        return False, 'ROS shutdown while waiting for reset'
+
+    def run_qrcode_target_task(self):
+        cycle = 0
+        while rclpy.ok():
+            cycle += 1
+            self.get_logger().info(f'QR loop cycle={cycle} phase=go_home')
+            success, message = self.go_named_point('home')
+            if not success:
+                return False, f'go home failed at cycle={cycle}: {message}'
+
+            self.get_logger().info(f'QR loop cycle={cycle} phase=scan_target')
+            success, target_or_reason = self.wait_for_qrcode_target()
+            if not success:
+                return False, target_or_reason
+
+            target = target_or_reason
+            self.get_logger().info(f'QR loop cycle={cycle} target={target}')
+            success, message = self.go_named_point(target)
+            if not success:
+                return False, f'QR target navigation failed target={target}: {message}'
+
+            success, message = self.wait_for_reset_instruction()
+            if not success:
+                return False, message
+
+        return False, 'ROS shutdown'
 
     def parse_go_named_point(self, task):
         if ':' in task:

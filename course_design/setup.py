@@ -29,6 +29,7 @@ setup(
             'map_status_node = course_design.map_status_node:main',
             'waypoint_nav_node = course_design.waypoint_nav_node:main',
             'behavior_node = course_design.behavior_node:main',
+            'qrcode_detect_node = course_design.qrcode_detect_node:main',
         ],
     },
 )

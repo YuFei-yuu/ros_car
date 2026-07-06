@@ -22,6 +22,13 @@ def launch_setup(_context):
             os.path.join(course_design_path, 'launch', 'course_nav.launch.py')),
     )
 
+    qrcode_node = Node(
+        package='course_design',
+        executable='qrcode_detect_node',
+        output='screen',
+        parameters=[{'config_file': config_file}],
+    )
+
     behavior_node = Node(
         package='course_design',
         executable='behavior_node',
@@ -29,7 +36,7 @@ def launch_setup(_context):
         parameters=[{'config_file': config_file}],
     )
 
-    return [course_nav_launch, behavior_node]
+    return [course_nav_launch, qrcode_node, behavior_node]
 
 
 def generate_launch_description():
