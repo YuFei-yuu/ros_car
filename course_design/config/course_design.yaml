@@ -40,10 +40,11 @@ waypoints:
     yaw_deg: 180.0
 
 behavior:
-  autorun: true
-  start_delay_sec: 2.0
+  require_initial_pose: true
+  initial_pose_topic: /initialpose
+  start_topic: /behavior_start
   default_task: patrol
   patrol_points:
     - pick_area
-    - goal_green
+    - home
   patrol_count: 3
