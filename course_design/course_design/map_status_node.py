@@ -1,5 +1,5 @@
 import os
-import threading
+import subprocess
 
 import rclpy
 from nav_msgs.msg import OccupancyGrid
@@ -7,7 +7,6 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
-from slam_toolbox.srv import SaveMap
 from std_srvs.srv import Trigger
 
 from course_design.config_utils import load_config_from_node
@@ -21,8 +20,6 @@ class MapStatusNode(Node):
 
         self.map_topic = self.mapping_config.get('map_topic', '/map')
         self.scan_topic = self.mapping_config.get('scan_topic', '/scan')
-        self.save_service_name = self.mapping_config.get(
-            'save_service', '/slam_toolbox/save_map')
         self.save_path = self.mapping_config.get(
             'save_path', '/home/ubuntu/ros2_ws/src/slam/maps/map_01')
         self.save_timeout_sec = float(self.mapping_config.get('save_timeout_sec', 15.0))
@@ -37,11 +34,6 @@ class MapStatusNode(Node):
 
         self.create_subscription(OccupancyGrid, self.map_topic, self.map_callback, 1)
         self.create_subscription(LaserScan, self.scan_topic, self.scan_callback, 10)
-        self.save_client = self.create_client(
-            SaveMap,
-            self.save_service_name,
-            callback_group=self.callback_group,
-        )
         self.create_service(
             Trigger,
             '~/save_map',
@@ -59,7 +51,7 @@ class MapStatusNode(Node):
         self.get_logger().info(f'Course mapping status started. config={self.config_path}')
         self.get_logger().info(
             f'Watching map_topic={self.map_topic}, scan_topic={self.scan_topic}, '
-            f'save_service={self.save_service_name}'
+            f'save_path={self.save_path}'
         )
 
     def map_callback(self, msg):
@@ -95,36 +87,57 @@ class MapStatusNode(Node):
     def save_map_callback(self, _request, response):
         os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
 
-        if not self.save_client.wait_for_service(timeout_sec=2.0):
+        if self.last_map_time is None:
             response.success = False
-            response.message = f'SaveMap service unavailable: {self.save_service_name}'
+            response.message = f'No map received on {self.map_topic}; cannot save yet'
             self.get_logger().error(response.message)
             return response
 
-        request = SaveMap.Request()
-        request.name.data = self.save_path
+        command = [
+            'ros2',
+            'run',
+            'nav2_map_server',
+            'map_saver_cli',
+            '-f',
+            self.save_path,
+            '--ros-args',
+            '-p',
+            'map_subscribe_transient_local:=true',
+        ]
 
-        self.get_logger().info(f'Saving map as {self.save_path}')
-        future = self.save_client.call_async(request)
-        done = threading.Event()
-        future.add_done_callback(lambda _future: done.set())
-
-        if not done.wait(self.save_timeout_sec):
-            response.success = False
-            response.message = f'SaveMap timeout after {self.save_timeout_sec:.1f}s'
-            self.get_logger().error(response.message)
-            return response
-
+        self.get_logger().info('Saving map with nav2_map_server map_saver_cli')
+        self.get_logger().info(' '.join(command))
         try:
-            result = future.result()
-        except Exception as exc:  # noqa: BLE001
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=self.save_timeout_sec,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
             response.success = False
-            response.message = f'SaveMap failed: {exc}'
+            response.message = f'map_saver_cli timeout after {self.save_timeout_sec:.1f}s'
             self.get_logger().error(response.message)
             return response
 
-        response.success = result.result == 0
-        response.message = f'SaveMap result={result.result} path={self.save_path}'
+        yaml_path = f'{self.save_path}.yaml'
+        pgm_path = f'{self.save_path}.pgm'
+        response.success = (
+            result.returncode == 0
+            and os.path.exists(yaml_path)
+            and os.path.exists(pgm_path)
+        )
+        if response.success:
+            response.message = f'map saved: {yaml_path}, {pgm_path}'
+        else:
+            details = (result.stderr or result.stdout or '').strip()
+            response.message = (
+                f'map_saver_cli failed code={result.returncode} path={self.save_path}'
+            )
+            if details:
+                response.message = f'{response.message}; {details[-300:]}'
+
         if response.success:
             self.get_logger().info(response.message)
         else:

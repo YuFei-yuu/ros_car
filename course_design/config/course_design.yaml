@@ -6,7 +6,6 @@ mapping:
   map_name: map_01
   map_topic: /map
   scan_topic: /scan
-  save_service: /slam_toolbox/save_map
   save_path: /home/ubuntu/ros2_ws/src/slam/maps/map_01
   status_period_sec: 5.0
   save_timeout_sec: 15.0

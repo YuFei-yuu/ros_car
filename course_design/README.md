@@ -4,7 +4,7 @@
 
 ## 实现方式
 
-- 建图：复用 `slam_toolbox` 的二维激光 SLAM，订阅 `/scan` 构建 `/map`，通过 `/slam_toolbox/save_map` 保存地图。
+- 建图：复用 `slam_toolbox` 的二维激光 SLAM，订阅 `/scan` 构建 `/map`，通过 `nav2_map_server map_saver_cli` 保存地图。
 - 定位：复用 Nav2 中的 AMCL 粒子滤波定位。
 - 导航：复用 Nav2，包含 Navfn 全局规划和 TEB/DWB 局部控制器。
 - 避障：复用 Nav2 global/local costmap 的 static layer、obstacle/voxel layer 和 inflation layer。静态障碍来自已保存地图，动态障碍来自导航时的激光雷达 `/scan`。
@@ -42,6 +42,11 @@
 cd /home/ubuntu/ros2_ws
 colcon build --packages-select course_design --parallel-workers 1
 source install/setup.bash
+```
+
+停用出厂服务
+```bash
+sudo systemctl stop start_app_node.service
 ```
 
 建图：
