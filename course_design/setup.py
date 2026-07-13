@@ -30,6 +30,8 @@ setup(
             'waypoint_nav_node = course_design.waypoint_nav_node:main',
             'behavior_node = course_design.behavior_node:main',
             'qrcode_detect_node = course_design.qrcode_detect_node:main',
+            'pick_place_node = course_design.pick_place_node:main',
+            'transport_workflow_node = course_design.transport_workflow_node:main',
         ],
     },
 )

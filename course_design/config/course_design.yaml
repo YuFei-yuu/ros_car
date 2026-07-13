@@ -61,3 +61,44 @@ behavior:
     - pick_area
     - home
   patrol_count: 3
+
+transport:
+  target_color: red
+  goal_by_color:
+    red: goal_red
+    green: goal_green
+    blue: goal_blue
+  require_initial_pose: true
+  initial_pose_topic: /initialpose
+  start_topic: /transport_start
+  cancel_topic: /transport_cancel
+  state_topic: /transport_workflow/state
+  service_timeout_sec: 30.0
+  pick_place_node: /pick_place_node
+
+vision:
+  detect_type: rect
+  target_pixel:
+    x: 320
+    y: 388
+  x_tolerance_px: 10
+  y_tolerance_px: 10
+  stable_frames: 10
+  angular_gain: 0.003
+  linear_gain: 0.0028
+  max_angular_speed: 0.12
+  max_linear_speed: 0.03
+  control_period_sec: 0.1
+  detection_timeout_sec: 15.0
+  lost_timeout_sec: 2.0
+
+arm:
+  action_group_dir: /home/ubuntu/software/arm_pc/ActionGroups
+  pick_ready_action: navigation_pick_init
+  pick_action: navigation_pick
+  place_action: navigation_place
+  safe_action: navigation_pick_init
+  pick_ready_timeout_sec: 15.0
+  pick_timeout_sec: 20.0
+  place_timeout_sec: 20.0
+  safe_timeout_sec: 15.0

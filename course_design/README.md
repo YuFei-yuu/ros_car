@@ -35,6 +35,12 @@
 - `qrcode.target_topic`: 默认 `/qrcode/target`
 - `qrcode.timeout_sec`: 默认 `0.0`，表示一直等待二维码目标
 - `qrcode.allowed_targets`: 二维码允许输出的目标点名
+- `transport.target_color`: 单色搬运目标，默认 `red`
+- `transport.goal_by_color`: 目标颜色到导航点的映射，例如 `red: goal_red`
+- `vision.target_pixel`、`vision.*_tolerance_px`: 取货区视觉对准目标像素和容差
+- `vision.angular_gain`、`vision.linear_gain`: 视觉控制增益；现场标定时可调整正负方向
+- `vision.max_*_speed`: 视觉对准的低速限幅
+- `arm.*_action`、`arm.*_timeout_sec`: 机械臂动作组及其超时保护
 
 地图保存固定为：
 
@@ -142,6 +148,62 @@ ros2 topic echo /qrcode/target
 ros2 topic echo /qrcode/image_result
 ```
 
+## 单色自主搬运
+
+单色搬运使用 `transport.target_color` 指定当前任务颜色。默认流程为：
+
+1. 在 RViz 设置初始位姿。
+2. 机械臂执行 `navigation_pick_init`。
+3. 导航到 `pick_area`，识别并对准目标颜色，执行 `navigation_pick`。
+4. 导航到 `transport.goal_by_color` 指定的目标点，例如 `goal_red`，执行 `navigation_place`。
+5. 返回 `home`，机械臂回到安全姿态并进入 `DONE`。
+
+完整流程使用已保存地图，不启动 SLAM。启动前确认 `course_design.yaml` 中的 `home`、`pick_area`、目标点坐标以及视觉对准参数已经现场标定。
+
+单独调试颜色识别、对准和机械臂取放：
+
+```bash
+ros2 launch course_design color_pick.launch.py
+```
+
+在另一终端选择目标颜色、初始化机械臂并执行抓取：
+
+```bash
+ros2 service call /pick_place_node/set_target_color interfaces/srv/SetString "{data: red}"
+ros2 service call /pick_place_node/prepare std_srvs/srv/Trigger "{}"
+ros2 service call /pick_place_node/pick std_srvs/srv/Trigger "{}"
+```
+
+抓取测试完成后，可单独执行放置或停止：
+
+```bash
+ros2 service call /pick_place_node/place std_srvs/srv/Trigger "{}"
+ros2 service call /pick_place_node/stop std_srvs/srv/Trigger "{}"
+```
+
+完整搬运流程：
+
+```bash
+ros2 launch course_design transport.launch.py
+```
+
+该命令会打开 RViz，但不会立刻移动。使用 RViz 顶部的 `2D Pose Estimate` 设置初始位姿后，启动并观察状态：
+
+```bash
+ros2 service call /transport_workflow_node/start std_srvs/srv/Trigger "{}"
+ros2 topic echo /transport_workflow/state
+```
+
+也可以用话题启动，或在任何阶段取消流程：
+
+```bash
+ros2 topic pub --once /transport_start std_msgs/msg/Bool "{data: true}"
+ros2 service call /transport_workflow_node/cancel std_srvs/srv/Trigger "{}"
+ros2 topic pub --once /transport_cancel std_msgs/msg/Bool "{data: true}"
+```
+
+取消、检测超时、动作组缺失、动作超时或导航失败时，工作流会取消导航、发布零速度并尝试让机械臂回到安全姿态。完整流程运行期间必须有人看守。
+
 ## 调试顺序
 
 1. 启动 `mapping.launch.py`，确认终端持续输出 `/map` 和 `/scan` 状态。
@@ -151,5 +213,5 @@ ros2 topic echo /qrcode/image_result
 5. 启动 `behavior.launch.py`，在 RViz 中用 `2D Pose Estimate` 设置初始位姿。
 6. 调用 `/behavior_node/start` 或发布 `/behavior_start`，启动默认二维码目标任务。
 7. 到达二维码目标后，调用 `/behavior_node/reset` 或发布 `/behavior_reset`，验证循环进入下一轮。
-
-调试阶段必须有人看守。任一导航失败、超时或流程结束时，节点会发布零速度到配置中的停车话题。
+8. 启动 `color_pick.launch.py`，完成目标像素、容差、控制增益和速度上限的标定。
+9. 启动 `transport.launch.py`，依次验证 `GO_PICK_AREA`、`PICK`、`GO_GOAL`、`PLACE`、`RETURN_HOME`、`SAFE`、`DONE` 状态。

@@ -189,3 +189,108 @@
 - 能执行一次导航到目标点任务。
 - 能在两个点之间完成指定次数往返巡逻。
 - 任一步导航失败时，决策树进入 `ERROR` 并输出失败步骤。
+
+## 6. 单色自主搬运工作流
+
+本阶段在第 5 节的导航能力基础上完成一个可配置颜色的完整闭环。一次任务只搬运一种颜色，默认红色：初始化 -> 导航到 `pick_area` -> 视觉对准并抓取目标颜色物块 -> 导航到对应目标区 -> 放置 -> 返回 `home`。
+
+不修改厂家 `example`、`slam`、`navigation`、`app` 包；所有新增封装仍放在 `src/course_design`。颜色识别复用厂家 `color_detect` 可执行节点和既有 ROS 接口，机械臂复用已有动作组。
+
+### 6.1 工作流范围与默认策略
+
+- 目标颜色由 `course_design.yaml` 的 `transport.target_color` 配置，默认 `red`。
+- 颜色到导航点使用 `transport.goal_by_color` 映射；默认 `red -> goal_red`，同时预留 `green -> goal_green`、`blue -> goal_blue`。
+- 色块默认使用 `rect` 检测。
+- 抓取前只识别配置的目标颜色；存在多个同色块时选择检测尺寸最大的目标。
+- 视觉对准稳定后运行 `navigation_pick`；动作组正常运行完成即视为抓取成功。
+- 到达目标点后统一运行 `navigation_place`。
+- 放置后自动导航回 `home`，再让机械臂回到 `navigation_pick_init` 安全姿态并结束。
+
+### 6.2 配置扩展
+
+扩展 `src/course_design/config/course_design.yaml`：
+
+- `transport`：目标颜色、颜色到目标点映射、初始位姿要求、启动/取消话题。
+- `vision`：图像识别类型、目标像素坐标、水平/前后容差、稳定帧数、线速度和角速度增益、速度上限、检测丢失和对准超时。
+- `arm`：动作组目录、`pick_ready`、`pick`、`place`、`safe` 动作名，以及每个动作的超时。
+- 继续复用现有 `navigation` 的导航超时、反馈周期和停车话题。
+
+不在代码中固化地图坐标、ROI、速度方向或机械臂动作组名称。线速度增益允许为正或负，以适配相机像素 y 方向与实际前进方向的现场标定结果。
+
+### 6.3 取放节点调试
+
+新增节点：`pick_place_node.py`。
+
+职责：
+
+- 订阅 `/color_detect/color_info`，维护最新的目标颜色检测结果。
+- 调用 `/color_detect/set_param` 配置单一目标颜色和检测类型；使用 `/controller/cmd_vel` 做低速视觉对准。
+- 连续达到配置的稳定帧数后发布零速度，执行抓取动作组；放置请求执行放置动作组。
+- 在执行前检查动作组 `.d6a` 文件是否存在；机械臂动作在工作线程运行并受超时保护。
+- 任意检测超时、目标丢失、动作超时或动作组缺失都发布零速度、记录失败原因并返回失败。
+
+提供服务，均复用现有接口类型：
+
+- `~/set_target_color`：`interfaces/srv/SetString`，设置并校验目标颜色。
+- `~/pick`：`std_srvs/srv/Trigger`，执行视觉对准和抓取。
+- `~/place`：`std_srvs/srv/Trigger`，执行 `navigation_place`。
+- `~/stop`：`std_srvs/srv/Trigger`，停止底盘并中止当前取放流程。
+
+新增独立 launch：`color_pick.launch.py`。
+
+- 启动一次底盘、相机、舵机基础硬件，启动厂家 `color_detect` 节点和 `pick_place_node`。
+- 不 include 厂家 `color_detect_node.launch.py`，避免重复启动深度相机。
+- 用于单独调试颜色识别、视觉对准、抓取和放置，不能启动 Nav2 或 SLAM。
+
+验收：
+
+- 可通过 `set_target_color` 设置 `red`，并在 `/color_detect/color_info` 观察目标颜色的像素坐标。
+- 物块进入配置 ROI 后，小车低速对准并停车，机械臂执行 `navigation_pick`。
+- 调用 `place` 可执行 `navigation_place`；检测或动作失败时底盘保持停止。
+
+### 6.4 完整搬运状态机
+
+新增节点：`transport_workflow_node.py`。
+
+节点独立创建 `BasicNavigator`，直接复用 `navigation_utils.run_navigation()`，不依赖 `waypoint_nav_node` 的服务，也不与它并发发送导航目标。
+
+状态机固定为：
+
+1. `WAIT_INITIAL_POSE`：等待 RViz 发布 `/initialpose`，并等待人工启动命令。
+2. `INITIALIZE`：发布零速度，校验 YAML、颜色目标点、取放服务和动作组文件，运行 `navigation_pick_init`。
+3. `GO_PICK_AREA`：导航至 `pick_area`，超时后取消 Nav2 任务。
+4. `PICK`：设置目标颜色并调用 `pick_place_node` 的抓取服务。
+5. `GO_GOAL`：按 `goal_by_color` 导航至目标点，例如 `goal_red`。
+6. `PLACE`：确认底盘停止后调用放置服务。
+7. `RETURN_HOME`：导航至 `home`。
+8. `DONE`：发布零速度，运行安全动作，输出完成日志。
+9. `ERROR`：取消 Nav2、发布零速度、尽力运行安全动作，输出阶段、颜色、目标点和失败原因。
+
+对外接口：
+
+- `~/start`、`~/cancel`：`std_srvs/srv/Trigger`。
+- 配置的启动/取消 `std_msgs/msg/Bool` 话题。
+- `/transport_workflow/state`：`std_msgs/msg/String`，发布当前状态，便于终端和录屏验证。
+
+新增 launch：`transport.launch.py`。
+
+- Include `navigation/launch/navigation.launch.py`，使用已保存地图，绝不启动 SLAM。
+- 启动厂家 `color_detect` 可执行节点、`pick_place_node`、`transport_workflow_node` 和 RViz。
+- 不启动二维码识别、`behavior_node` 或任何会重复启动相机、底盘、舵机的厂家 launch。
+- 所有节点使用 `output='screen'`；启动后默认不移动，必须先在 RViz 设置初始位姿并显式调用启动服务。
+
+### 6.5 调试与验收顺序
+
+1. 继续使用 `course_nav.launch.py` 验证 `home`、`pick_area` 和当前颜色目标点的导航、停车及避障。
+2. 启动 `color_pick.launch.py`，先标定目标像素、容差、增益和速度上限，再验证单独抓取、单独放置。
+3. 启动 `transport.launch.py`，在 RViz 设置初始位姿，调用 `transport_workflow_node` 的启动服务。
+4. 检查状态按 `INITIALIZE -> GO_PICK_AREA -> PICK -> GO_GOAL -> PLACE -> RETURN_HOME -> DONE` 转换。
+5. 分别验证未检测到色块、目标丢失、动作组缺失、动作超时、导航失败/超时和人工取消；每种情况都必须停止底盘并进入 `ERROR` 或取消状态。
+6. 为配置校验、颜色到目标映射、速度限幅和稳定帧判定添加不依赖硬件的单元测试。
+7. 使用单核命令构建并检查：
+
+```bash
+cd /home/ubuntu/ros2_ws
+colcon build --packages-select course_design --parallel-workers 1
+source install/setup.bash
+```
