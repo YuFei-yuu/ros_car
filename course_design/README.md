@@ -160,32 +160,66 @@ ros2 topic echo /qrcode/image_result
 
 完整流程使用已保存地图，不启动 SLAM。启动前确认 `course_design.yaml` 中的 `home`、`pick_area`、目标点坐标以及视觉对准参数已经现场标定。
 
-单独调试颜色识别、对准和机械臂取放：
+1. 单独调试颜色识别、对准和机械臂取放：
 
 ```bash
 ros2 launch course_design color_pick.launch.py
 ```
 
-在另一终端选择目标颜色、初始化机械臂并执行抓取：
+该命令会同时启动 RViz，并自动加载 `color_pick.rviz`，在 Image 面板中显示
+`/color_detect/image_result`。该 launch 仍然只启动相机、底盘、舵机和颜色检测，
+不启动 Nav2 或 SLAM。
+
+2. 标定 LAB 颜色阈值。保持物块和背景处于实际工作光照下运行：
+
+```bash
+bash /home/ubuntu/software/lab_tool/lab_tool.sh
+```
+
+3. 检查相机和检测结果话题。RViz 会自动显示 `/color_detect/image_result`，也可以用 `rqt_image_view` 查看原图`/depth_cam/rgb0/image_raw`或结果图`/color_detect/image_result`。
+
+```bash
+ros2 run rqt_image_view rqt_image_view
+```
+
+4. 配置并验证检测颜色。服务返回 `success: True` 后，结果图才会绘制该颜色的检测框。
 
 ```bash
 ros2 service call /pick_place_node/set_target_color interfaces/srv/SetString "{data: red}"
+```
+
+5. 标定视觉对准位置。观察 `color_info` 中物块中心的 `x`、`y`，将机械臂实际可抓取时的中心位置写入 `course_design.yaml`：
+
+```yaml
+vision:
+  target_pixel:
+    x: 320
+    y: 388
+```
+
+同时调整 `x_tolerance_px`、`y_tolerance_px`、`angular_gain`、`linear_gain` 和 `max_*_speed`。方向错误时反转对应增益符号；每次只调整一个参数，修改后重启节点。
+
+6. 在另一终端初始化机械臂并执行抓取：
+
+```bash
 ros2 service call /pick_place_node/prepare std_srvs/srv/Trigger "{}"
 ros2 service call /pick_place_node/pick std_srvs/srv/Trigger "{}"
+ros2 service call /pick_place_node/place std_srvs/srv/Trigger "{}"
+```
+
+7. 任意阶段停止：
+
+```bash
+ros2 service call /pick_place_node/stop std_srvs/srv/Trigger "{}"
+ros2 topic pub --once /controller/cmd_vel geometry_msgs/msg/Twist "{}"
 ```
 
 `set_target_color` 会立即配置 `/color_detect/set_param`。服务返回成功后，
 `/color_detect/image_result` 才会开始绘制目标颜色的检测框；如果返回检测器不可用，先检查
 `ros2 service list | grep color_detect`，不要直接调用 `pick`。
 
-抓取测试完成后，可单独执行放置或停止：
 
-```bash
-ros2 service call /pick_place_node/place std_srvs/srv/Trigger "{}"
-ros2 service call /pick_place_node/stop std_srvs/srv/Trigger "{}"
-```
-
-完整搬运流程：
+8. 完整搬运流程：
 
 ```bash
 ros2 launch course_design transport.launch.py

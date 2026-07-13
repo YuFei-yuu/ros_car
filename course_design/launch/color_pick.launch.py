@@ -2,7 +2,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, OpaqueFunction
+from launch.actions import ExecuteProcess, IncludeLaunchDescription, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
@@ -43,7 +43,12 @@ def launch_setup(_context):
         parameters=[{'config_file': os.path.join(
             course_design_path, 'config', 'course_design.yaml')}],
     )
-    return [robot_launch, color_detect_node, pick_place_node]
+    rviz_node = ExecuteProcess(
+        cmd=['rviz2', '-d', os.path.join(
+            course_design_path, 'rviz', 'color_pick.rviz')],
+        output='screen',
+    )
+    return [robot_launch, color_detect_node, pick_place_node, rviz_node]
 
 
 def generate_launch_description():
