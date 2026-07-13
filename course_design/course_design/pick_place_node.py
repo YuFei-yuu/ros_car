@@ -132,9 +132,16 @@ class PickPlaceNode(Node):
         with self.detection_lock:
             self.latest_detection = None
             self.latest_detection_time = 0.0
-        response.success = True
-        response.message = f'target color set to {color}'
-        self.get_logger().info(response.message)
+        configured, reason = self.configure_color_detector()
+        response.success = configured
+        response.message = (
+            f'target color set to {color}' if configured
+            else f'target color set locally, detector configuration failed: {reason}'
+        )
+        if configured:
+            self.get_logger().info(response.message)
+        else:
+            self.get_logger().error(response.message)
         return response
 
     def prepare_callback(self, _request, response):

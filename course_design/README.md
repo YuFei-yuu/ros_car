@@ -174,6 +174,10 @@ ros2 service call /pick_place_node/prepare std_srvs/srv/Trigger "{}"
 ros2 service call /pick_place_node/pick std_srvs/srv/Trigger "{}"
 ```
 
+`set_target_color` 会立即配置 `/color_detect/set_param`。服务返回成功后，
+`/color_detect/image_result` 才会开始绘制目标颜色的检测框；如果返回检测器不可用，先检查
+`ros2 service list | grep color_detect`，不要直接调用 `pick`。
+
 抓取测试完成后，可单独执行放置或停止：
 
 ```bash
