@@ -30,6 +30,8 @@ def launch_setup(_context):
         PythonLaunchDescriptionSource(
             os.path.join(navigation_path, 'launch', 'navigation.launch.py')),
         launch_arguments={
+            'robot_name': '/',
+            'master_name': '/',
             'map': config.get('map_name', 'map_01'),
             'use_teb': 'true' if config.get('use_teb', True) else 'false',
         }.items(),
