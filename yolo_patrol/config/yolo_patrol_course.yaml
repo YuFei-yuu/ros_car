@@ -1,0 +1,41 @@
+# YOLO 巡检专用导航配置。
+#
+# 作用：
+# - 只保留 YOLO 巡检任务需要的 home 与 inspect_* 点；
+# - 不包含 qrcode_target 使用的 goal_red/goal_green/goal_blue；
+# - 让 RViz marker 和 yolo_patrol_node 都只围绕巡检任务显示和运行。
+#
+# 注意：
+# 下面的坐标只是模板值，第一次现场测试前需要在 RViz 地图中重新标定。
+
+map_name: map_01
+use_teb: true
+map_frame: map
+
+navigation:
+  timeout_sec: 300.0
+  feedback_period_sec: 3.0
+  stop_topics:
+    - /controller/cmd_vel
+    - /cmd_vel
+
+waypoints:
+  home:
+    x: 0.0
+    y: 0.0
+    yaw_deg: 0.0
+
+  inspect_1:
+    x: 1.819
+    y: 0.536
+    yaw_deg: -37.393
+
+  inspect_2:
+    x: -0.598
+    y: 1.574
+    yaw_deg: 0.025
+
+  inspect_3:
+    x: 0.0
+    y: 1.0
+    yaw_deg: 180.0

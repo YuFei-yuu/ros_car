@@ -1,0 +1,82 @@
+# YOLO 增强巡逻任务配置。
+#
+# 本配置只描述 YOLO 巡检任务本身；地图、命名点和 Nav2 参数放在
+# config/yolo_patrol_course.yaml 中，避免混用 course_design.yaml 里的
+# qrcode_target 目标点 goal_red/goal_green/goal_blue。
+
+course_config_file: /home/ubuntu/ros2_ws/src/yolo_patrol/config/yolo_patrol_course.yaml
+
+navigation:
+  timeout_sec: 300.0
+  feedback_period_sec: 3.0
+  stop_topics:
+    - /controller/cmd_vel
+    - /cmd_vel
+
+task:
+  require_initial_pose: true
+  initial_pose_topic: /initialpose
+  start_topic: /yolo_patrol/start
+  reset_topic: /yolo_patrol/reset
+  # 三个专用巡检点，与原 patrol 的 pick_area/home 和 qrcode_target 的
+  # goal_red/goal_green/goal_blue 区分开。
+  patrol_points:
+    - inspect_1
+    - inspect_2
+    - inspect_3
+  patrol_count: 2
+  settle_time_sec: 1.0
+  return_home_after_done: true
+  return_home_after_alert: false
+
+yolo:
+  object_topic: /yolo/object_detect
+  start_service: /yolo/start
+  stop_service: /yolo/stop
+  call_start_service: true
+  call_stop_service_after_done: false
+  service_timeout_sec: 3.0
+
+detection:
+  # 停车后正式观察时间。判断任务结果以这段时间为主。
+  observe_time_sec: 5.0
+  min_score: 0.60
+  stable_min_count: 3
+  # 如果移动中看到过候选目标，但停车后没有确认，可追加一次观察。
+  retry_on_moving_candidate: true
+  retry_observe_time_sec: 3.0
+  # 移动中只做轻量监听和日志，不直接触发停车，避免误检导致导航频繁中断。
+  enable_moving_watch: true
+  moving_candidate_max_age_sec: 15.0
+  moving_min_score: 0.70
+  # 第一版建议用 COCO/通用模型可识别的类别。
+  # 后续若按手册训练自定义模型，只需把类名改成训练后的标签名。
+  watch_classes:
+    - person
+    - bottle
+    - cell phone
+    - backpack
+    - suitcase
+    - book
+
+policy:
+  # safety_stop：安全风险，停车等待人工 reset。
+  safety_stop:
+    - person
+  # alert_stop：异常或遗留贵重物，停车等待人工 reset。
+  alert_stop:
+    - cell phone
+    - backpack
+    - suitcase
+  # log_continue：普通遗留物，只记录并继续巡逻。
+  log_continue:
+    - bottle
+    - book
+  no_detection_action: continue
+  no_yolo_data_action: warn_continue
+  missed_after_moving_action: warn_continue
+  wait_for_reset_on_stop: true
+
+report:
+  print_summary_after_done: true
+  status_topic: /yolo_patrol/status
