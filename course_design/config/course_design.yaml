@@ -79,8 +79,8 @@ transport:
 vision:
   detect_type: rect
   target_pixel:
-    x: 320
-    y: 388
+    x: 330
+    y: 260
   x_tolerance_px: 10
   y_tolerance_px: 10
   stable_frames: 10
