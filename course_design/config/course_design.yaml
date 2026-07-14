@@ -32,24 +32,24 @@ qrcode:
 waypoints:
   home:
     x: 0.0
-    y: 0.0
+    y: -0.2
     yaw_deg: 0.0
   pick_area:
-    x: 1.0
-    y: 0.0
+    x: 0.6
+    y: -0.2
     yaw_deg: 0.0
   goal_red:
     x: 1.0
-    y: 1.0
+    y: 0.8
     yaw_deg: 90.0
   goal_green:
-    x: 0.0
-    y: 1.0
-    yaw_deg: 180.0
+    x: 0.5
+    y: 0.8
+    yaw_deg: 90.0
   goal_blue:
-    x: -1.0
-    y: 1.0
-    yaw_deg: 180.0
+    x: 0.0
+    y: 0.8
+    yaw_deg: 90.0
 
 behavior:
   require_initial_pose: true
@@ -64,6 +64,7 @@ behavior:
 
 transport:
   target_color: red
+  color_sequence: [red, green, blue]
   goal_by_color:
     red: goal_red
     green: goal_green
@@ -74,6 +75,9 @@ transport:
   cancel_topic: /transport_cancel
   state_topic: /transport_workflow/state
   service_timeout_sec: 30.0
+  backoff_speed_mps: 0.08
+  backoff_duration_sec: 2.5
+  backoff_period_sec: 0.05
   pick_place_node: /pick_place_node
 
 vision:

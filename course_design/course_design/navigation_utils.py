@@ -73,6 +73,43 @@ def publish_stop(publishers):
         publisher.publish(twist)
 
 
+def run_timed_backoff(
+    node,
+    publishers,
+    speed_mps,
+    duration_sec,
+    period_sec,
+    cancel_event=None,
+):
+    """Drive backward for a configured duration, then always publish zero speed."""
+    command = Twist()
+    command.linear.x = -float(speed_mps)
+    duration_sec = float(duration_sec)
+    period_sec = float(period_sec)
+    started = time.monotonic()
+
+    try:
+        while rclpy.ok() and time.monotonic() - started < duration_sec:
+            if cancel_event is not None and cancel_event.is_set():
+                return False, 'cancelled during backoff'
+            for publisher in publishers:
+                publisher.publish(command)
+            remaining = duration_sec - (time.monotonic() - started)
+            if remaining > 0.0:
+                time.sleep(min(period_sec, remaining))
+    finally:
+        publish_stop(publishers)
+
+    if cancel_event is not None and cancel_event.is_set():
+        return False, 'cancelled during backoff'
+    if not rclpy.ok():
+        return False, 'ROS shutdown during backoff'
+    node.get_logger().info(
+        f'BACKOFF DONE speed={abs(command.linear.x):.3f}m/s '
+        f'duration={duration_sec:.3f}s')
+    return True, 'completed'
+
+
 def run_navigation(
     node,
     navigator,

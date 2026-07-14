@@ -1,5 +1,6 @@
 import os
 import threading
+import math
 import time
 
 import rclpy
@@ -11,14 +12,48 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
+from visualization_msgs.msg import MarkerArray
 
 from course_design.config_utils import as_bool, load_config_from_node
+from course_design.marker_utils import publish_waypoint_markers
 from course_design.navigation_utils import (
     make_stop_publishers,
     publish_stop,
     run_navigation,
+    run_timed_backoff,
     waypoint_to_pose,
 )
+
+
+def parse_color_sequence(transport_config):
+    """Return the configured color sequence, preserving legacy single-color config."""
+    if 'color_sequence' not in transport_config:
+        raw_sequence = [transport_config.get('target_color', 'red')]
+    else:
+        raw_sequence = transport_config.get('color_sequence')
+
+    if not isinstance(raw_sequence, (list, tuple)) or not raw_sequence:
+        return None, 'transport.color_sequence must be a non-empty list'
+
+    sequence = []
+    for raw_color in raw_sequence:
+        color = str(raw_color).strip().lower()
+        if not color:
+            return None, 'transport.color_sequence contains an empty color'
+        sequence.append(color)
+    return sequence, ''
+
+
+def parse_positive_float(transport_config, key, default):
+    """Read a finite positive transport parameter."""
+    raw_value = transport_config.get(key, default)
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return None, f'transport.{key} must be a positive number'
+    if not math.isfinite(value) or value <= 0.0:
+        return None, f'transport.{key} must be a positive number'
+    return value, ''
 
 
 class TransportWorkflowNode(Node):
@@ -35,12 +70,19 @@ class TransportWorkflowNode(Node):
         self.state = 'WAIT_INITIAL_POSE'
         self.color = str(self.transport_config.get('target_color', 'red')).lower()
         self.goal_name = ''
+        self.color_sequence = []
+        self.goal_by_color = {}
+        self.backoff_speed_mps = 0.0
+        self.backoff_duration_sec = 0.0
+        self.backoff_period_sec = 0.0
         self.phase = ''
 
         stop_topics = self.navigation_config.get('stop_topics', ['/controller/cmd_vel'])
         self.stop_publishers = make_stop_publishers(self, stop_topics)
         self.state_publisher = self.create_publisher(
             String, self.transport_config.get('state_topic', '/transport_workflow/state'), 10)
+        self.marker_pub = self.create_publisher(MarkerArray, '/waypoints', 1)
+        self.create_timer(5.0, self.publish_markers)
         self.pick_place_node = self.transport_config.get(
             'pick_place_node', '/pick_place_node').rstrip('/')
         self.set_color_client = self.create_client(
@@ -89,6 +131,10 @@ class TransportWorkflowNode(Node):
             self.set_state('READY', 'waiting for start command')
         else:
             self.set_state('WAIT_INITIAL_POSE', 'set initial pose in RViz before start')
+        self.publish_markers()
+
+    def publish_markers(self):
+        publish_waypoint_markers(self, self.marker_pub, self.config)
 
     def requires_initial_pose(self):
         return as_bool(self.transport_config.get('require_initial_pose', True), True)
@@ -160,25 +206,15 @@ class TransportWorkflowNode(Node):
         try:
             success, reason = self.preflight()
             if success:
-                self.set_state('INITIALIZE', f'color={self.color} goal={self.goal_name}')
+                self.set_state(
+                    'INITIALIZE',
+                    f'colors={",".join(self.color_sequence)}',
+                )
                 success, reason = self.call_service(
                     self.prepare_client, Trigger.Request(), 'arm initialization')
             if success:
-                success, reason = self.navigate('GO_PICK_AREA', 'pick_area')
-            if success:
-                self.set_state('PICK', f'color={self.color}')
-                success, reason = self.call_service(
-                    self.set_color_client, self.color_request(), 'set target color')
-            if success:
-                success, reason = self.call_service(
-                    self.pick_client, Trigger.Request(), 'pick target')
-            if success:
-                success, reason = self.navigate('GO_GOAL', self.goal_name)
-            if success:
-                self.set_state('PLACE', f'goal={self.goal_name}')
-                publish_stop(self.stop_publishers)
-                success, reason = self.call_service(
-                    self.place_client, Trigger.Request(), 'place target')
+                for index, color in enumerate(self.color_sequence, start=1):
+                    success, reason = self.run_color_cycle(index, color)
             if success:
                 success, reason = self.navigate('RETURN_HOME', 'home')
 
@@ -188,7 +224,10 @@ class TransportWorkflowNode(Node):
                 success, reason = self.call_service(
                     self.safe_client, Trigger.Request(), 'safe arm pose')
             if success:
-                self.set_state('DONE', f'color={self.color} returned home')
+                self.set_state(
+                    'DONE',
+                    f'colors={",".join(self.color_sequence)} returned home',
+                )
                 publish_stop(self.stop_publishers)
             else:
                 final_state = 'CANCELED' if self.cancel_event.is_set() else 'ERROR'
@@ -199,14 +238,73 @@ class TransportWorkflowNode(Node):
             publish_stop(self.stop_publishers)
             self.workflow_lock.release()
 
+    def run_color_cycle(self, index, color):
+        self.color = color
+        self.goal_name = self.goal_by_color[color]
+        context = f'color={self.color} item={index}/{len(self.color_sequence)}'
+
+        success, reason = self.navigate('GO_PICK_AREA', 'pick_area', context)
+        if success:
+            self.set_state('PICK', context)
+            success, reason = self.call_service(
+                self.set_color_client, self.color_request(), 'set target color')
+        if success:
+            success, reason = self.call_service(
+                self.pick_client, Trigger.Request(), 'pick target')
+        if success:
+            success, reason = self.backoff(context)
+        if success:
+            success, reason = self.navigate('GO_GOAL', self.goal_name, context)
+        if success:
+            self.set_state('PLACE', f'{context} goal={self.goal_name}')
+            publish_stop(self.stop_publishers)
+            success, reason = self.call_service(
+                self.place_client, Trigger.Request(), 'place target')
+        return success, reason
+
     def preflight(self):
-        self.color = str(self.transport_config.get('target_color', 'red')).lower()
-        goal_by_color = self.transport_config.get('goal_by_color', {})
-        self.goal_name = str(goal_by_color.get(self.color, '')).strip()
-        if not self.color or not self.goal_name:
-            return False, f'no goal configured for target color {self.color!r}'
+        self.color_sequence, reason = parse_color_sequence(self.transport_config)
+        if self.color_sequence is None:
+            return False, reason
+
+        raw_goal_by_color = self.transport_config.get('goal_by_color', {})
+        if not isinstance(raw_goal_by_color, dict):
+            return False, 'transport.goal_by_color must be a mapping'
+        self.goal_by_color = {
+            str(color).strip().lower(): str(waypoint).strip()
+            for color, waypoint in raw_goal_by_color.items()
+        }
+
+        missing_goals = [
+            color for color in self.color_sequence
+            if not self.goal_by_color.get(color)
+        ]
+        if missing_goals:
+            missing_color_names = ', '.join(sorted(set(missing_goals)))
+            return False, f'no goal configured for color(s): {missing_color_names}'
+
+        self.color = self.color_sequence[0]
+        self.goal_name = self.goal_by_color[self.color]
+        self.backoff_speed_mps, reason = parse_positive_float(
+            self.transport_config, 'backoff_speed_mps', 0.05)
+        if self.backoff_speed_mps is None:
+            return False, reason
+        self.backoff_duration_sec, reason = parse_positive_float(
+            self.transport_config, 'backoff_duration_sec', 3.0)
+        if self.backoff_duration_sec is None:
+            return False, reason
+        self.backoff_period_sec, reason = parse_positive_float(
+            self.transport_config, 'backoff_period_sec', 0.05)
+        if self.backoff_period_sec is None:
+            return False, reason
+
         waypoints = self.config.get('waypoints', {})
-        for name in ('home', 'pick_area', self.goal_name):
+        required_waypoints = {
+            'home',
+            'pick_area',
+            *(self.goal_by_color[color] for color in self.color_sequence),
+        }
+        for name in sorted(required_waypoints):
             if name not in waypoints:
                 return False, f'required waypoint is not configured: {name}'
         action_dir = str(self.arm_config.get('action_group_dir', '')).strip()
@@ -234,10 +332,13 @@ class TransportWorkflowNode(Node):
         request.data = self.color
         return request
 
-    def navigate(self, state, waypoint):
+    def navigate(self, state, waypoint, context=''):
         if self.cancel_event.is_set():
             return False, 'cancelled before navigation'
-        self.set_state(state, f'goal={waypoint}')
+        reason = f'goal={waypoint}'
+        if context:
+            reason = f'{context} {reason}'
+        self.set_state(state, reason)
         try:
             pose = waypoint_to_pose(self, self.config, waypoint)
         except KeyError as exc:
@@ -254,6 +355,24 @@ class TransportWorkflowNode(Node):
         if self.cancel_event.is_set():
             return False, f'cancelled during navigation to {waypoint}'
         return success, f'navigation {waypoint}: {result}'
+
+    def backoff(self, context):
+        if self.cancel_event.is_set():
+            return False, 'cancelled before backoff'
+        self.set_state(
+            'BACKOFF',
+            f'{context} speed={self.backoff_speed_mps:.3f}m/s '
+            f'duration={self.backoff_duration_sec:.3f}s',
+        )
+        success, result = run_timed_backoff(
+            self,
+            self.stop_publishers,
+            self.backoff_speed_mps,
+            self.backoff_duration_sec,
+            self.backoff_period_sec,
+            self.cancel_event,
+        )
+        return success, f'backoff: {result}'
 
     def call_service(self, client, request, label):
         if self.cancel_event.is_set():

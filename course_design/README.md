@@ -35,8 +35,12 @@
 - `qrcode.target_topic`: 默认 `/qrcode/target`
 - `qrcode.timeout_sec`: 默认 `0.0`，表示一直等待二维码目标
 - `qrcode.allowed_targets`: 二维码允许输出的目标点名
-- `transport.target_color`: 单色搬运目标，默认 `red`
+- `transport.target_color`: 兼容旧配置的单色搬运目标，默认 `red`
+- `transport.color_sequence`: 搬运颜色顺序，当前示例为 `[red, green, blue]`
 - `transport.goal_by_color`: 目标颜色到导航点的映射，例如 `red: goal_red`
+- `transport.backoff_speed_mps`: 抓取后的后退速度，当前示例为 `0.06 m/s`
+- `transport.backoff_duration_sec`: 抓取后的后退持续时间，当前示例为 `2.0 s`
+- `transport.backoff_period_sec`: 后退速度指令发布周期，当前示例为 `0.05 s`
 - `vision.target_pixel`、`vision.*_tolerance_px`: 取货区视觉对准目标像素和容差
 - `vision.angular_gain`、`vision.linear_gain`: 视觉控制增益；现场标定时可调整正负方向
 - `vision.max_*_speed`: 视觉对准的低速限幅
@@ -66,7 +70,7 @@ sudo systemctl stop start_app_node.service
 建图：
 
 ```bash
-ros2 launch course_design mapping.launch.py
+
 ```
 
 该命令会默认打开 RViz，使用 `slam/rviz/slam_desktop.rviz` 观察 `/map`、`/scan` 和 TF。
@@ -148,17 +152,22 @@ ros2 topic echo /qrcode/target
 ros2 topic echo /qrcode/image_result
 ```
 
-## 单色自主搬运
+## 多颜色自主搬运
 
-单色搬运使用 `transport.target_color` 指定当前任务颜色。默认流程为：
+搬运流程使用 `transport.color_sequence` 指定颜色顺序，并通过
+`transport.goal_by_color` 找到每种颜色对应的目标点。默认流程为：
 
 1. 在 RViz 设置初始位姿。
 2. 机械臂执行 `navigation_pick_init`。
-3. 导航到 `pick_area`，识别并对准目标颜色，执行 `navigation_pick`。
-4. 导航到 `transport.goal_by_color` 指定的目标点，例如 `goal_red`，执行 `navigation_place`。
-5. 返回 `home`，机械臂回到安全姿态并进入 `DONE`。
+3. 按 `color_sequence` 顺序导航到 `pick_area`，识别并对准目标颜色，执行 `navigation_pick`。
+4. 抓取后按 `backoff_speed_mps` 后退 `backoff_duration_sec`。
+5. 导航到该颜色在 `goal_by_color` 中配置的目标点，执行 `navigation_place`。
+6. 重复步骤 3 至 5，直到列表中的颜色全部完成。
+7. 返回 `home`，机械臂回到安全姿态并进入 `DONE`。
 
-完整流程使用已保存地图，不启动 SLAM。启动前确认 `course_design.yaml` 中的 `home`、`pick_area`、目标点坐标以及视觉对准参数已经现场标定。
+完整流程使用已保存地图，不启动 SLAM。启动前确认 `course_design.yaml` 中的 `home`、`pick_area`、目标点坐标、颜色顺序、后退参数以及视觉对准参数已经现场标定。
+
+当前示例后退参数为 `0.06 m/s` 持续 `2.0 s`
 
 1. 单独调试颜色识别、对准和机械臂取放：
 
@@ -252,4 +261,4 @@ ros2 topic pub --once /transport_cancel std_msgs/msg/Bool "{data: true}"
 6. 调用 `/behavior_node/start` 或发布 `/behavior_start`，启动默认二维码目标任务。
 7. 到达二维码目标后，调用 `/behavior_node/reset` 或发布 `/behavior_reset`，验证循环进入下一轮。
 8. 启动 `color_pick.launch.py`，完成目标像素、容差、控制增益和速度上限的标定。
-9. 启动 `transport.launch.py`，依次验证 `GO_PICK_AREA`、`PICK`、`GO_GOAL`、`PLACE`、`RETURN_HOME`、`SAFE`、`DONE` 状态。
+9. 启动 `transport.launch.py`，依次验证每种颜色的 `GO_PICK_AREA`、`PICK`、`BACKOFF`、`GO_GOAL`、`PLACE`，以及最后的 `RETURN_HOME`、`SAFE`、`DONE` 状态。
